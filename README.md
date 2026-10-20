@@ -109,6 +109,16 @@ tar -xzf dist/Grok_Bot_*_linux_x64.tar.gz
 ./Grok_Bot_*_linux_x64/grok-bot --ozone-platform-hint=auto
 ```
 
+Or install that tree for your user, with a menu entry and the
+`grokbot://` / `sand://` link handlers that the browser sign-in returns to
+(no root needed; the setuid sandbox helper is unavailable in a user
+install, so the launcher adds `--no-sandbox`):
+
+```bash
+make install-user      # ~/.local/share/grok-bot-unofficial + ~/.local/bin/grok-bot
+make uninstall-user
+```
+
 ## Build options
 
 | Command | Result |

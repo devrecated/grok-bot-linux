@@ -1,0 +1,2 @@
+# grok-bot-linux apt repo (GitHub Pages)
+deb [trusted=yes] https://devrecated.github.io/grok-bot-linux/deb stable main

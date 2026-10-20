@@ -1,0 +1,22 @@
+Package: grok-bot-linux
+Architecture: all
+Version: 0.1.0
+Priority: optional
+Section: misc
+Maintainer: Adam Siwiec <73085927+adamsiwiec1@users.noreply.github.com>
+Depends: curl, python3, ca-certificates, coreutils
+Recommends: gpgv | gnupg, libfuse2 | libfuse2t64
+Suggests: pkexec | sudo
+Filename: pool/main/grok-bot-linux_0.1.0_all.deb
+Size: 9144
+MD5sum: ee26165ad9fb752834248c1b04f26b1e
+SHA1: 68cb222f307d67ecd2fcac18404401212056c2b0
+SHA256: dfda37d454f6e96f75a45bfdc28cbf99ed0a7ee9b67b85812e8ff5bdcc1f36a1
+SHA512: 428fc0c9b4de32ce656a4f8b5d32a2dab0634cd694ebe6b73463c74985ffba02b9fcd12a1ffeff237c391046e2dfbd79b70b39399d552168326fe6173ff38afe
+Homepage: https://github.com/devrecated/grok-bot-linux
+Description: Helper that installs Cursor's official Grok Bot on Linux
+ Ships the MIT-licensed install scripts from grok-bot-linux. Run
+ grok-bot-linux-setup after installing to download and verify Cursor's
+ official .deb, .rpm, or AppImage. The package never redistributes
+ xAI or Cursor binaries.
+

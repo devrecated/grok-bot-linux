@@ -1,0 +1,5 @@
+[grok-bot-linux]
+name=grok-bot-linux (GitHub Pages)
+baseurl=https://devrecated.github.io/grok-bot-linux/rpm
+enabled=1
+gpgcheck=0

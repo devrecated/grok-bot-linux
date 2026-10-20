@@ -1,7 +1,7 @@
 PREFIX ?= /usr/local
 UPDATER_BIN ?= $(HOME)/.local/bin/grok-bot-update
 
-.PHONY: help detect build run update install-deb install-updater install-official clean install-user uninstall-user test
+.PHONY: help detect build run update install-deb install-updater install-official clean install-user uninstall-user test mac mac-install
 
 help:
 	@echo "Grok Bot Linux port"
@@ -17,6 +17,8 @@ help:
 	@echo "  make install-official Install Cursor's official Linux build (verified)"
 	@echo "  make install-user     Install the built tree into ~/.local (no root, any distro)"
 	@echo "  make uninstall-user   Remove that user install"
+	@echo "  make mac          macOS 11 only: rebuild the Mac app on Electron 37 (dist/macos)"
+	@echo "  make mac-install  Same, then copy Grok Bot.app to /Applications"
 	@echo "  make clean        Remove dist/ (keeps .cache/ downloads)"
 
 detect:
@@ -54,6 +56,10 @@ install-user:
 
 uninstall-user:
 	./scripts/uninstall-user.sh
+mac:
+	./scripts/build-macos.sh
+mac-install:
+	./scripts/build-macos.sh --install
 
 clean:
 	rm -rf dist

@@ -119,6 +119,76 @@ make install-user      # ~/.local/share/grok-bot-unofficial + ~/.local/bin/grok-
 make uninstall-user
 ```
 
+## Older Macs (macOS 11 Big Sur)
+
+The official Mac app needs macOS 12 or newer (`LSMinimumSystemVersion`
+12.0, Electron 42). `make mac` rebuilds it for **macOS 11 Big Sur** by
+moving the official `app.asar` onto Electron 37, the last Electron release
+that supports Big Sur. The native addons are the official ones, unchanged:
+they are N-API modules built for macOS 11 (Apple silicon) and 10.13 (Intel).
+Run this on the Mac itself.
+
+```bash
+# 1. MacPorts for your macOS version: https://www.macports.org/install.php
+#    (needs the Xcode Command Line Tools: xcode-select --install)
+sudo port install nodejs22 npm10 git
+
+git clone <this-repo> grok-bot-linux
+cd grok-bot-linux
+make mac-install        # or: make mac   (leaves it in dist/macos/)
+
+open "/Applications/Grok Bot.app"
+```
+
+`make mac` checks for MacPorts and installs `nodejs22` and `npm10` itself if
+Node.js 18+ isn't already available. It downloads the official `.dmg` and
+checks that Anysphere signed it, downloads Electron and checks it against
+Electron's `SHASUMS256.txt`, then assembles and ad-hoc signs
+`dist/macos/Grok Bot.app`.
+
+What to expect:
+
+- The in-app updater is off. An official update would bring back Electron
+  42, which doesn't start on Big Sur. To update, run `make mac-install` again.
+- Two official helpers ask for a newer macOS and won't load on Big Sur. The
+  build prints a warning for each:
+  - `sand-op-launcher` (1Password connection) needs macOS 12.
+  - Computer Use needs macOS 14, the same as with the official app on 12 and 13.
+- macOS 10.15 and older are not supported. Electron 32, the last release for
+  Catalina, fails to start this version of Grok Bot.
+- Not supported by Cursor, and nobody has tested it on a real Big Sur Mac
+  yet. See below.
+
+### Testing on an old Mac
+
+1. Install MacPorts for your macOS version from
+   https://www.macports.org/install.php. Follow its steps, including
+   `xcode-select --install`, then open a new Terminal window.
+2. Get the branch:
+   ```bash
+   git clone -b macos-legacy https://github.com/adamsiwiec1/grok-bot-linux-unofficial.git
+   cd grok-bot-linux-unofficial
+   ```
+3. Build and install:
+   ```bash
+   make mac-install 2>&1 | tee mac-build.log
+   ```
+   This asks for your password if it needs to install MacPorts packages. If
+   MacPorts has no prebuilt Node.js for your macOS, building it can take a
+   long time.
+4. Run `open "/Applications/Grok Bot.app"` and check:
+   - the app opens and the sign-in screen appears;
+   - **Sign in** opens your browser, and the `grokbot://` link brings you back
+     to the app signed in;
+   - you can open a Bot and send it a message;
+   - it doesn't offer an update or restart into one.
+5. Report back. Send `sw_vers`, `uname -m`, `mac-build.log`, what worked,
+   and what didn't. If the app quits, include any crash report from
+   Console.app → Crash Reports, or the output of
+   `"/Applications/Grok Bot.app/Contents/MacOS/Grok Bot"` run in Terminal.
+   Comment on the pull request, or open a pull request against the
+   `macos-legacy` branch of adamsiwiec1/grok-bot-linux-unofficial.
+
 ## Build options
 
 | Command | Result |

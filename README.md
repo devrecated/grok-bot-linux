@@ -86,6 +86,19 @@ Bots live on the cloud computer; this build is the remote control.
 
 ## Other distros
 
+`make build` works without `dpkg-deb`: it builds every format the machine
+has tools for and skips the rest with a note (`FORMATS=tar` or
+`./scripts/build.sh --formats tar` to ask for just the tarball). Build
+dependencies:
+
+```bash
+sudo dnf install nodejs npm gcc gcc-c++ unzip python3 curl p7zip p7zip-plugins   # Fedora
+sudo pacman -S nodejs npm gcc unzip python curl 7zip                             # Arch
+```
+
+Node.js headers are not needed: if `node_api.h` is not installed, the build
+fetches the header-only `node-api-headers` package from npm.
+
 The tarball in `dist/` is a self-contained Electron tree. On Fedora /
 Arch, install GTK3, NSS, ALSA, and Mesa, then:
 
@@ -99,7 +112,8 @@ tar -xzf dist/Grok_Bot_*_linux_x64.tar.gz
 | Command | Result |
 |---|---|
 | `make detect` | Newest stable version from Cursor's update API |
-| `make build` | Tarball + `.deb` + AppImage in `dist/` |
+| `make build` | Tarball + `.deb` + AppImage in `dist/` (whatever this host can build) |
+| `make build FORMATS=tar` | Only the runnable tree and tarball |
 | `make update` | Build, validate, and install only when needed |
 | `./scripts/update.sh --check` | Compare installed and latest versions |
 | `./scripts/build.sh X.Y.Z` | Pin a specific upstream version |
@@ -165,7 +179,8 @@ Details: [docs/how-it-works.md](docs/how-it-works.md).
 
 - x86_64 Linux, glibc 2.34+ (Ubuntu 22.04 or newer)
 - Eligible Grok Bot plan (same as the official apps)
-- Build machine: `p7zip-full`, `curl`, `unzip`, `g++`, `python3`, Node 20+
+- Build machine: `p7zip-full`, `curl`, `unzip`, `g++`, `python3`, Node 20+;
+  `dpkg-deb` for the `.deb`, `squashfs-tools` and `file` for the AppImage
 
 This repository never commits the official installer, `app.asar`, or
 built binaries. Those are produced on your machine.

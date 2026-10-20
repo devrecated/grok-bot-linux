@@ -2,8 +2,9 @@
 # Rebuild the official Grok Bot Windows installer as a native Linux app.
 #
 # Usage:
-#   scripts/build.sh                 # latest CDN version
-#   scripts/build.sh --deb-only      # only the Ubuntu/Debian package
+#   scripts/build.sh                     # latest CDN version, every format this host can build
+#   scripts/build.sh --formats tar       # only the runnable tree + tarball (any distro)
+#   scripts/build.sh --deb-only          # same as --formats deb
 #   scripts/build.sh X.Y.Z
 #   scripts/build.sh --exe /path/to/Grok_Bot_X.Y.Z_Setup.exe
 set -euo pipefail
@@ -11,31 +12,43 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="${ROOT}/dist"
 CACHE="${ROOT}/.cache"
-ELECTRON_VERSION="${ELECTRON_VERSION:-42.1.0}"
+# Electron is read from the Windows payload unless ELECTRON_VERSION is set.
+ELECTRON_OVERRIDE="${ELECTRON_VERSION:-}"
+NODE_API_HEADERS_VERSION="1.9.0"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--deb-only] [--exe /path/to/Grok_Bot_X.Y.Z_Setup.exe] [X.Y.Z]
+Usage: $(basename "$0") [--formats LIST] [--deb-only] [--exe /path/to/Grok_Bot_X.Y.Z_Setup.exe] [X.Y.Z]
 
 Downloads the official Windows installer (or uses --exe), extracts the
-Electron app without Wine, fuses it with Electron ${ELECTRON_VERSION} for
-Linux, replaces Windows native addons, and writes:
+Electron app without Wine, fuses it with the matching Electron for Linux,
+replaces Windows native addons, and writes some of:
 
-  dist/Grok_Bot_<ver>_linux_x64/          runnable tree
-  dist/Grok_Bot_<ver>_linux_x64.tar.gz
-  dist/grok-bot_<ver>_amd64.deb
-  dist/Grok_Bot_<ver>_x86_64.AppImage     (if mksquashfs is available)
+  dist/Grok_Bot_<ver>_linux_x64/          runnable tree (always)
+  dist/Grok_Bot_<ver>_linux_x64.tar.gz    format "tar"
+  dist/grok-bot_<ver>_amd64.deb           format "deb" (needs dpkg-deb)
+  dist/Grok_Bot_<ver>_x86_64.AppImage     format "appimage" (needs mksquashfs, file)
 
-With --deb-only, only dist/grok-bot_<ver>_amd64.deb is written.
+--formats takes a comma-separated list of tar, deb, appimage. Without it,
+every format this machine has the tools for is built, and the others are
+skipped with a note. A format you ask for explicitly must succeed.
+--deb-only is the same as --formats deb and skips the runnable tree in dist/.
+
+Environment:
+  ELECTRON_VERSION      use this Electron instead of the one in the payload
+  GROKBOT_NODE_INCLUDE  directory containing node_api.h
 EOF
 }
 
 EXE=""
 VERSION=""
+FORMATS=""
 DEB_ONLY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --deb-only) DEB_ONLY=1; shift ;;
+    --deb-only) DEB_ONLY=1; FORMATS="deb"; shift ;;
+    --formats) FORMATS="${2:?--formats needs a list such as tar,deb,appimage}"; shift 2 ;;
+    --formats=*) FORMATS="${1#*=}"; shift ;;
     --exe) EXE="${2:?}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option $1" >&2; usage >&2; exit 1 ;;
@@ -43,12 +56,137 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+die() { echo "error: $*" >&2; exit 1; }
+
+# Print an install hint for the host's package manager.
+hint() {
+  local apt="$1" dnf="$2" pacman="$3"
+  if command -v apt-get >/dev/null; then echo "  sudo apt install ${apt}"
+  elif command -v dnf >/dev/null; then echo "  sudo dnf install ${dnf}"
+  elif command -v pacman >/dev/null; then echo "  sudo pacman -S ${pacman}"
+  elif command -v zypper >/dev/null; then echo "  sudo zypper install ${dnf}"
+  fi
+}
+
+# --- preflight: everything is checked before the ~110 MB download ----------
+missing=0
+need() {
+  local cmd="$1"; shift
+  if ! command -v "$cmd" >/dev/null; then
+    echo "missing required command: ${cmd}" >&2
+    hint "$@" >&2
+    missing=1
+  fi
+}
+need curl curl curl curl
+need unzip unzip unzip unzip
+need node nodejs nodejs nodejs
+need npm npm npm npm
+need npx npm npm npm
+need gcc build-essential gcc gcc
+need g++ build-essential gcc-c++ gcc
+need python3 python3 python3 python3
+if ! command -v 7z >/dev/null && ! command -v 7za >/dev/null; then
+  echo "missing required command: 7z" >&2
+  hint p7zip-full p7zip-plugins 7zip >&2
+  missing=1
+fi
+[[ "$missing" -eq 0 ]] || exit 1
+SEVEN_ZIP="7z"
+command -v 7z >/dev/null || SEVEN_ZIP="7za"
+
+can_build() {
+  case "$1" in
+    tar) return 0 ;;
+    deb) command -v dpkg-deb >/dev/null ;;
+    appimage) command -v mksquashfs >/dev/null && command -v file >/dev/null ;;
+    *) return 1 ;;
+  esac
+}
+explain() {
+  case "$1" in
+    deb) echo "deb needs dpkg-deb"; hint dpkg-dev dpkg dpkg ;;
+    appimage) echo "appimage needs mksquashfs and file"; hint "squashfs-tools file" "squashfs-tools file" "squashfs-tools file" ;;
+  esac
+}
+
+declare -A WANT=()
+EXPLICIT=0
+if [[ -n "$FORMATS" ]]; then
+  EXPLICIT=1
+  IFS=',' read -r -a requested <<<"$FORMATS"
+  for f in "${requested[@]}"; do
+    case "$f" in
+      tar|deb|appimage) ;;
+      *) die "unknown format '${f}' (use tar, deb, appimage)" ;;
+    esac
+    if ! can_build "$f"; then
+      explain "$f" >&2
+      die "cannot build requested format: ${f}"
+    fi
+    WANT[$f]=1
+  done
+else
+  for f in tar deb appimage; do
+    if can_build "$f"; then
+      WANT[$f]=1
+    else
+      echo "note: skipping ${f}: $(explain "$f" | head -1)" >&2
+    fi
+  done
+fi
+want() { [[ -n "${WANT[$1]:-}" ]]; }
+
+# node_api.h: explicit path, the running node's own headers, nvm, system
+# headers, and finally the header-only node-api-headers package from npm
+# (distro nodejs packages usually ship without headers).
+find_node_include() {
+  local cand node_bin
+  if [[ -n "${GROKBOT_NODE_INCLUDE:-}" && -f "${GROKBOT_NODE_INCLUDE}/node_api.h" ]]; then
+    printf '%s\n' "$GROKBOT_NODE_INCLUDE"
+    return 0
+  fi
+  node_bin="$(readlink -f "$(command -v node)")"
+  cand="$(dirname "$(dirname "$node_bin")")/include/node"
+  if [[ -f "${cand}/node_api.h" ]]; then
+    printf '%s\n' "$cand"
+    return 0
+  fi
+  cand="$(dirname "$(find "${HOME}/.nvm/versions/node" /usr/include /usr/local/include \
+    -name node_api.h 2>/dev/null | sort | tail -1)")"
+  if [[ -f "${cand}/node_api.h" ]]; then
+    printf '%s\n' "$cand"
+    return 0
+  fi
+  cand="${CACHE}/node-api-headers-${NODE_API_HEADERS_VERSION}/package/include"
+  if [[ ! -f "${cand}/node_api.h" ]]; then
+    local tmp
+    tmp="$(mktemp -d)"
+    ( cd "$tmp" && npm pack --silent "node-api-headers@${NODE_API_HEADERS_VERSION}" >/dev/null ) || { rm -rf "$tmp"; return 1; }
+    mkdir -p "${CACHE}/node-api-headers-${NODE_API_HEADERS_VERSION}"
+    tar -xzf "$tmp"/node-api-headers-*.tgz -C "${CACHE}/node-api-headers-${NODE_API_HEADERS_VERSION}"
+    rm -rf "$tmp"
+  fi
+  if [[ -f "${cand}/node_api.h" ]]; then
+    printf '%s\n' "$cand"
+    return 0
+  fi
+  return 1
+}
+
+mkdir -p "$CACHE"
+NODE_INCLUDE="$(find_node_include)" ||
+  die "node_api.h not found and node-api-headers could not be fetched; set GROKBOT_NODE_INCLUDE"
+export GROKBOT_NODE_INCLUDE="$NODE_INCLUDE"
+
+# --- installer -----------------------------------------------------------------
 if [[ -n "$EXE" ]]; then
   EXE="$(readlink -f "$EXE")"
-  [[ -f "$EXE" ]] || { echo "not found: $EXE" >&2; exit 1; }
+  [[ -f "$EXE" ]] || die "not found: $EXE"
   if [[ -z "$VERSION" && "$EXE" =~ Grok_Bot_([0-9]+\.[0-9]+\.[0-9]+)_Setup\.exe$ ]]; then
     VERSION="${BASH_REMATCH[1]}"
   fi
+  [[ -n "$VERSION" ]] || die "cannot tell the version from $(basename "$EXE"); pass it as X.Y.Z"
 fi
 
 if [[ -z "$VERSION" ]]; then
@@ -56,7 +194,6 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 if [[ -z "$EXE" ]]; then
-  mkdir -p "$CACHE"
   EXE="${CACHE}/Grok_Bot_${VERSION}_Setup.exe"
   if [[ ! -f "$EXE" ]]; then
     url="https://downloads.cursor.com/grokbot/stable/win32-x64/${VERSION}/Grok_Bot_${VERSION}_Setup.exe"
@@ -66,57 +203,16 @@ if [[ -z "$EXE" ]]; then
   fi
 fi
 
-find_node_include() {
-  local cand
-  if [[ -n "${GROKBOT_NODE_INCLUDE:-}" && -f "${GROKBOT_NODE_INCLUDE}/node_api.h" ]]; then
-    printf '%s\n' "$GROKBOT_NODE_INCLUDE"
-    return 0
-  fi
-  if [[ -f "${HOME}/.nvm/nvm.sh" ]]; then
-    # shellcheck disable=SC1091
-    source "${HOME}/.nvm/nvm.sh"
-  fi
-  cand="$(dirname "$(find "${HOME}/.nvm/versions/node" /usr/include /usr/local/include \
-    -name node_api.h 2>/dev/null | sort | tail -1)")"
-  if [[ -f "${cand}/node_api.h" ]]; then
-    printf '%s\n' "$cand"
-    return 0
-  fi
-  return 1
-}
-
-NODE_INCLUDE="$(find_node_include)" || {
-  echo "node_api.h not found. Install Node.js headers (nodejs / nvm)." >&2
-  exit 1
-}
-export GROKBOT_NODE_INCLUDE="$NODE_INCLUDE"
-
-for cmd in curl unzip node npm npx g++ python3; do
-  command -v "$cmd" >/dev/null || { echo "missing required command: $cmd" >&2; exit 1; }
-done
-if ! command -v 7z >/dev/null && ! command -v 7za >/dev/null; then
-  echo "missing p7zip-full (7z)" >&2
-  exit 1
-fi
-SEVEN_ZIP="7z"
-command -v 7z >/dev/null || SEVEN_ZIP="7za"
-
 WORKDIR="$(mktemp -d -t grokbot-build-XXXXXX)"
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
-
-echo "Windows installer : $EXE"
-echo "Grok Bot version  : $VERSION"
-echo "Electron          : $ELECTRON_VERSION"
-echo "node_api.h        : $NODE_INCLUDE"
-echo "Workdir           : $WORKDIR"
 
 NSIS="${WORKDIR}/nsis"
 APP="${WORKDIR}/winapp"
 mkdir -p "$NSIS" "$APP"
 ( cd "$NSIS" && "$SEVEN_ZIP" x -y "$EXE" >/dev/null )
 PAYLOAD="$(find "$NSIS" -type f \( -name 'app-64.7z' -o -name 'app-32.7z' \) | head -1)"
-[[ -n "$PAYLOAD" ]] || { echo "app-64.7z missing from NSIS payload" >&2; exit 1; }
+[[ -n "$PAYLOAD" ]] || die "app-64.7z missing from NSIS payload"
 "$SEVEN_ZIP" x -y "$PAYLOAD" -o"$APP" >/dev/null
 ASAR="${APP}/resources/app.asar"
 if [[ ! -f "$ASAR" && -f "${APP}/app.asar" ]]; then
@@ -124,7 +220,31 @@ if [[ ! -f "$ASAR" && -f "${APP}/app.asar" ]]; then
   mv "${APP}/app.asar" "$ASAR"
   [[ -d "${APP}/app.asar.unpacked" ]] && mv "${APP}/app.asar.unpacked" "${APP}/resources/app.asar.unpacked"
 fi
-[[ -f "$ASAR" ]] || { echo "resources/app.asar missing" >&2; exit 1; }
+[[ -f "$ASAR" ]] || die "resources/app.asar missing"
+
+# The Windows executable embeds its Electron version in the user agent string.
+PAYLOAD_ELECTRON=""
+WIN_EXE="$(find "$APP" -maxdepth 1 -iname '*.exe' ! -iname 'uninstall*' ! -iname 'elevate*' | head -1)"
+if [[ -n "$WIN_EXE" ]]; then
+  PAYLOAD_ELECTRON="$(grep -aoE 'Electron/[0-9]+\.[0-9]+\.[0-9]+' "$WIN_EXE" | head -1 | cut -d/ -f2 || true)"
+fi
+if [[ -n "$ELECTRON_OVERRIDE" ]]; then
+  ELECTRON_VERSION="$ELECTRON_OVERRIDE"
+  if [[ -n "$PAYLOAD_ELECTRON" && "$PAYLOAD_ELECTRON" != "$ELECTRON_VERSION" ]]; then
+    echo "warn: payload was built for Electron ${PAYLOAD_ELECTRON}; using ELECTRON_VERSION=${ELECTRON_VERSION}" >&2
+  fi
+elif [[ -n "$PAYLOAD_ELECTRON" ]]; then
+  ELECTRON_VERSION="$PAYLOAD_ELECTRON"
+else
+  die "could not read the Electron version from the payload; set ELECTRON_VERSION"
+fi
+
+echo "Windows installer : $EXE"
+echo "Grok Bot version  : $VERSION"
+echo "Electron          : $ELECTRON_VERSION"
+echo "node_api.h        : $NODE_INCLUDE"
+echo "Formats           : $(printf '%s ' "${!WANT[@]}")"
+echo "Workdir           : $WORKDIR"
 
 EL_ZIP="${CACHE}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
 mkdir -p "$CACHE"
@@ -202,22 +322,28 @@ chmod 755 "${STAGE}/grok-bot"
 [[ -f "${STAGE}/chrome_crashpad_handler" ]] && chmod 755 "${STAGE}/chrome_crashpad_handler"
 find "${STAGE}" -type f \( -name '*.node' -o -name '*.so' -o -name '*.so.*' \) -exec chmod 755 {} +
 
+FAILED=0
 mkdir -p "$DIST"
 if [[ "$DEB_ONLY" -eq 1 ]]; then
   "${ROOT}/scripts/package-deb.sh" "$STAGE" "$VERSION" "$DIST"
 else
   rm -rf "${DIST}/Grok_Bot_${VERSION}_linux_x64"
   cp -a "$STAGE" "${DIST}/Grok_Bot_${VERSION}_linux_x64"
+  echo "tree ${DIST}/Grok_Bot_${VERSION}_linux_x64"
 
-  TARBALL="${DIST}/Grok_Bot_${VERSION}_linux_x64.tar.gz"
-  tar -C "$DIST" -czf "$TARBALL" "Grok_Bot_${VERSION}_linux_x64"
-  echo "tarball $TARBALL"
+  if want tar; then
+    TARBALL="${DIST}/Grok_Bot_${VERSION}_linux_x64.tar.gz"
+    tar -C "$DIST" -czf "$TARBALL" "Grok_Bot_${VERSION}_linux_x64"
+    echo "tarball $TARBALL"
+  fi
 
-  "${ROOT}/scripts/package-deb.sh" \
-    "${DIST}/Grok_Bot_${VERSION}_linux_x64" "$VERSION" "$DIST"
+  if want deb; then
+    "${ROOT}/scripts/package-deb.sh" \
+      "${DIST}/Grok_Bot_${VERSION}_linux_x64" "$VERSION" "$DIST"
+  fi
 fi
 
-if [[ "$DEB_ONLY" -eq 0 ]] && command -v mksquashfs >/dev/null; then
+if want appimage; then
   APPDIR="${WORKDIR}/AppDir"
   mkdir -p "${APPDIR}/usr/bin" "${APPDIR}/usr/share/applications"
   cp -a "${STAGE}/." "${APPDIR}/usr/bin/"
@@ -255,10 +381,14 @@ EOF
   if ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" "$APPIMAGE"; then
     chmod +x "$APPIMAGE"
     echo "appimage $APPIMAGE"
+  elif [[ "$EXPLICIT" -eq 1 ]]; then
+    die "AppImage step failed"
   else
-    echo "warn: AppImage step failed; tarball and .deb are still in dist/" >&2
+    echo "warn: AppImage step failed; the other formats are still in dist/" >&2
+    FAILED=1
   fi
 fi
 
 echo "done ${VERSION}"
 ls -lh "$DIST"
+exit "$FAILED"

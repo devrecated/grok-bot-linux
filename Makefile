@@ -8,6 +8,7 @@ help:
 	@echo
 	@echo "  make detect       Print the newest stable version from Cursor's update API"
 	@echo "  make build        Rebuild that version for Linux (tarball, .deb, AppImage)"
+	@echo "                    FORMATS=tar,deb,appimage picks formats (default: all this host can build)"
 	@echo "  make update       Build and install only when a newer version exists"
 	@echo "  make run          Launch the staged app from dist/"
 	@echo "  make install-deb  Alias for make update"
@@ -19,7 +20,7 @@ detect:
 	@./scripts/detect-version.sh
 
 build:
-	./scripts/build.sh
+	./scripts/build.sh $(if $(FORMATS),--formats $(FORMATS))
 
 run:
 	@version="$$(./scripts/detect-version.sh)"; \

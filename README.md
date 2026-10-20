@@ -1,9 +1,9 @@
-# Grok Bot for Linux
+# Grok Bot Linux
 
-Unofficial Ubuntu/Linux build of the **Grok Bot** desktop app.
+Ubuntu/Linux build of the **Grok Bot** desktop app.
 
-Originally written by [@jakob-bu](https://github.com/jakob-bu) —
-see the [original repository](https://github.com/jakob-bu/grok-bot-linux-unofficial).
+Originally written by [@jakob-bu](https://github.com/jakob-bu).
+See the [original repository](https://github.com/jakob-bu/grok-bot-linux-unofficial).
 This is the community-maintained continuation under the [Devrecated](https://github.com/devrecated) org.
 
 Cursor originally shipped Grok Bot for macOS and Windows only. This repo does the same
@@ -170,8 +170,8 @@ What to expect:
    `xcode-select --install`, then open a new Terminal window.
 2. Get the branch:
    ```bash
-   git clone -b macos-legacy https://github.com/adamsiwiec1/grok-bot-linux-unofficial.git
-   cd grok-bot-linux-unofficial
+   git clone -b macos-legacy https://github.com/devrecated/grok-bot-linux.git
+   cd grok-bot-linux
    ```
 3. Build and install:
    ```bash
@@ -191,7 +191,7 @@ What to expect:
    Console.app → Crash Reports, or the output of
    `"/Applications/Grok Bot.app/Contents/MacOS/Grok Bot"` run in Terminal.
    Comment on the pull request, or open a pull request against the
-   `macos-legacy` branch of adamsiwiec1/grok-bot-linux-unofficial.
+   `macos-legacy` branch of devrecated/grok-bot-linux.
 
 ## Build options
 
@@ -296,3 +296,9 @@ Scripts and Linux-native sources in this repo: [MIT](LICENSE).
 
 Grok Bot belongs to xAI / Cursor. Electron belongs to the Electron
 project. See [NOTICE.md](NOTICE.md).
+
+## Disclaimer
+
+Grok Bot Linux is an unofficial, community project. It is not affiliated with,
+endorsed by, or associated with xAI or Grok Bot / Grok. All related names and
+marks belong to their respective owners.

@@ -9,6 +9,8 @@ and replace the Windows-only native addons.
 
 It is **not** an xAI or Cursor product.
 
+Kudos to [@jakob-bu](https://github.com/jakob-bu) for the idea and original creation of this codebase [(original_repo)](https://github.com/jakob-bu/grok-bot-linux-unofficial). [Devrecated](https://github.com/devrecated) will be taking over maintenance of this repository and its open-source contributions going forward.
+
 ## Official Linux builds are now available
 
 Cursor now publishes official Linux builds with every

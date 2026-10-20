@@ -403,13 +403,14 @@ if want appimage; then
 [Desktop Entry]
 Name=Grok Bot
 Comment=Grok Bot (unofficial Linux build)
-Exec=grok-bot --no-sandbox --class=grok-bot
+Exec=grok-bot %U
 Icon=grok-bot
 Type=Application
 Categories=Network;
 Terminal=false
 StartupNotify=true
 StartupWMClass=grok-bot
+MimeType=x-scheme-handler/grokbot;x-scheme-handler/sand;
 X-AppImage-Version=${VERSION}
 EOF
   cp "${APPDIR}/grok-bot.desktop" "${APPDIR}/usr/share/applications/"

@@ -70,9 +70,11 @@ Or skip the package and run the tree directly:
 ```bash
 make build
 version="$(make -s detect)"
-"./dist/Grok_Bot_${version}_linux_x64/grok-bot" \
-  --no-sandbox --ozone-platform-hint=auto
+"./dist/Grok_Bot_${version}_linux_x64/grok-bot" --ozone-platform-hint=auto
 ```
+
+(`make run` does the same. Add `--no-sandbox` only where unprivileged user
+namespaces are disabled, as in some containers; see below.)
 
 AppImage (needs FUSE 2):
 
@@ -104,7 +106,7 @@ Arch, install GTK3, NSS, ALSA, and Mesa, then:
 
 ```bash
 tar -xzf dist/Grok_Bot_*_linux_x64.tar.gz
-./Grok_Bot_*_linux_x64/grok-bot --no-sandbox --ozone-platform-hint=auto
+./Grok_Bot_*_linux_x64/grok-bot --ozone-platform-hint=auto
 ```
 
 ## Build options
@@ -120,10 +122,13 @@ tar -xzf dist/Grok_Bot_*_linux_x64.tar.gz
 | `./scripts/build.sh --exe ~/Downloads/Grok_Bot_X.Y.Z_Setup.exe` | Use an installer you already downloaded |
 | `make install-updater` | Add `grok-bot-update` to `~/.local/bin` |
 
-If Chromium's sandbox cannot take setuid (containers, some Ubuntu
-defaults), the `/usr/bin/grok-bot` wrapper adds `--no-sandbox`. Extra
+The `/usr/bin/grok-bot` wrapper and the AppImage keep Chromium's sandbox
+on whenever user namespaces, the setuid `chrome-sandbox` helper, or the
+bundled AppArmor profile (installed by the `.deb` for Ubuntu 24.04's
+userns restriction) make it possible. Only when none of those work, as in
+some containers, do they add `--no-sandbox` and say so on stderr. Extra
 Electron flags go in `~/.config/grok-bot/electron-flags.conf`, one per
-line.
+line; each line is passed as a single argument.
 
 NVIDIA + black window: add `--ozone-platform=x11` to that file.
 

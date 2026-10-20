@@ -1,6 +1,7 @@
 #!/bin/sh
-# AppImage entry point. Chromium's setuid sandbox cannot work inside an
-# AppImage, so --no-sandbox is required here.
+# AppImage entry point. The setuid chrome-sandbox helper cannot work from a
+# FUSE mount, but Chromium's user-namespace sandbox can, so --no-sandbox is
+# only added when unprivileged user namespaces are unavailable.
 SELF="$(readlink -f "$0")"
 HERE="${SELF%/*}"
 
@@ -11,4 +12,9 @@ if [ -z "${GDK_BACKEND:-}" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
   set -- --ozone-platform-hint=auto "$@"
 fi
 
-exec "$HERE/usr/bin/grok-bot" --no-sandbox --class=grok-bot "$@"
+if ! { command -v unshare >/dev/null 2>&1 && unshare --user true 2>/dev/null; }; then
+  echo "grok-bot: user namespaces unavailable; starting with --no-sandbox" >&2
+  set -- --no-sandbox "$@"
+fi
+
+exec "$HERE/usr/bin/grok-bot" --class=grok-bot "$@"

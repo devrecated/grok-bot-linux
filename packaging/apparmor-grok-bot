@@ -1,0 +1,12 @@
+# Lets Grok Bot's bundled Chromium create the user namespaces its sandbox
+# needs on kernels that restrict unprivileged user namespaces
+# (kernel.apparmor_restrict_unprivileged_userns=1, the Ubuntu 24.04 default).
+# Same approach as the profiles Ubuntu ships for other Electron apps.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile grok-bot /opt/grok-bot/grok-bot flags=(unconfined) {
+  userns,
+
+  include if exists <local/grok-bot>
+}

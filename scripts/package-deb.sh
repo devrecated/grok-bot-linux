@@ -33,6 +33,8 @@ cp -a "${STAGE}/." "${PKG}/opt/grok-bot/"
 install -m 0755 "${ROOT}/packaging/grok-bot.sh" "${PKG}/usr/bin/grok-bot"
 install -m 0644 "${ROOT}/packaging/grok-bot.desktop" \
   "${PKG}/usr/share/applications/grok-bot.desktop"
+install -Dm 0644 "${ROOT}/packaging/apparmor-grok-bot" \
+  "${PKG}/opt/grok-bot/resources/apparmor-profile"
 
 ICON=""
 if [[ -f "${STAGE}/grok-bot.png" ]]; then
@@ -62,7 +64,7 @@ Section: net
 Priority: optional
 Architecture: amd64
 Maintainer: grok-bot-linux contributors
-Depends: libgtk-3-0 | libgtk-3-0t64, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0 | libatspi2.0-0t64, libsecret-1-0, libasound2 | libasound2t64
+Depends: libgtk-3-0 | libgtk-3-0t64, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0 | libatspi2.0-0t64, libsecret-1-0, libasound2 | libasound2t64, libgbm1, libxkbcommon0, libdrm2, libcups2 | libcups2t64, libxcomposite1, libxdamage1, libxrandr2, libuuid1
 Recommends: libfuse2 | libfuse2t64
 Description: Unofficial Linux build of the Grok Bot desktop app
  Rebuilds Cursor's official Windows Grok Bot installer on the
@@ -84,8 +86,35 @@ fi
 if command -v gtk-update-icon-cache >/dev/null; then
   gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 fi
+# Install the AppArmor profile that grants user namespaces to the app, so
+# the sandbox works where unprivileged userns is restricted (Ubuntu 24.04+).
+PROFILE_SRC=/opt/grok-bot/resources/apparmor-profile
+PROFILE=/etc/apparmor.d/grok-bot
+if command -v apparmor_parser >/dev/null && [ -d /etc/apparmor.d ] && \
+    apparmor_parser --skip-kernel-load --debug "$PROFILE_SRC" >/dev/null 2>&1; then
+  cp -f "$PROFILE_SRC" "$PROFILE"
+  if [ -d /sys/kernel/security/apparmor ] && \
+      ! { [ -x /usr/bin/ischroot ] && /usr/bin/ischroot; }; then
+    apparmor_parser --replace --write-cache --skip-read-cache "$PROFILE" || true
+  fi
+fi
 EOF
 chmod 0755 "${PKG}/DEBIAN/postinst"
+
+cat > "${PKG}/DEBIAN/postrm" <<'EOF'
+#!/bin/sh
+set -e
+PROFILE=/etc/apparmor.d/grok-bot
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+  if [ -f "$PROFILE" ]; then
+    if command -v apparmor_parser >/dev/null && [ -d /sys/kernel/security/apparmor ]; then
+      apparmor_parser --remove "$PROFILE" >/dev/null 2>&1 || true
+    fi
+    rm -f "$PROFILE"
+  fi
+fi
+EOF
+chmod 0755 "${PKG}/DEBIAN/postrm"
 
 # chrome-sandbox must be root:root 4755 in the package for dpkg to keep setuid
 if [[ -f "${PKG}/opt/grok-bot/chrome-sandbox" ]]; then

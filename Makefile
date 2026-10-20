@@ -26,7 +26,8 @@ run:
 	@version="$$(./scripts/detect-version.sh)"; \
 	app="dist/Grok_Bot_$${version}_linux_x64/grok-bot"; \
 	if [ ! -x "$$app" ]; then $(MAKE) build; fi; \
-	"$$app" --no-sandbox --ozone-platform-hint=auto --class=grok-bot
+	sandbox=""; unshare --user true 2>/dev/null || sandbox="--no-sandbox"; \
+	"$$app" $$sandbox --ozone-platform-hint=auto --class=grok-bot
 
 update install-deb:
 	./scripts/update.sh

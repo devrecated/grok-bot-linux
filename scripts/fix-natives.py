@@ -8,6 +8,8 @@ modules are compiled from native/ in this repository.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import re
@@ -33,13 +35,47 @@ def run(cmd: list[str], cwd: Path | None = None) -> None:
     subprocess.check_call(cmd, cwd=cwd)
 
 
+# Registry integrity (npm view <spec> dist.integrity) for every package
+# this script downloads, so a changed tarball fails the build.
+NPM_INTEGRITY = {
+    "tree-sitter@0.21.1": "sha512-7dxoA6kYvtgWw80265MyqJlkRl4yawIjO7S5MigytjELkX43fV2WsAXzsNfO7sBpPPCF5Gp0+XzHk0DwLCq3xQ==",
+    "tree-sitter-bash@0.21.0": "sha512-UuXf+wliu1mmS/O2Iz7OQghExM4a+lk+GaVPndZVpAJnFuzanaN33UcHOsrmngHxaOXHz5JSZrwp6i2qM/PKag==",
+    "whichlang-node-linux-x64-gnu@0.2.1": "sha512-jCU2jVYew0Q42kbaDlYNGUNb4Tsh3m8/AajXIge+bT4XlKZ5zIQxSnirRViQ6VQ9h59KieYzV2IyVbjBiK7X2g==",
+}
+
+BETTER_SQLITE3_URL = (
+    "https://github.com/WiseLibs/better-sqlite3/releases/download/"
+    "v12.11.1/better-sqlite3-v12.11.1-electron-v146-linux-x64.tar.gz"
+)
+BETTER_SQLITE3_SHA256 = "e2021aeed80de4f15212525e30565756aaae790e68e3229df6d1345f43803221"
+
+
+def safe_extract(tgz: Path, dest: Path) -> None:
+    """Extract a .tar.gz without following absolute paths, .. or links out."""
+    with tarfile.open(tgz, "r:gz") as archive:
+        if hasattr(tarfile, "data_filter"):
+            archive.extractall(dest, filter="data")
+            return
+        root = dest.resolve()
+        for member in archive.getmembers():
+            target = (dest / member.name).resolve()
+            if root not in target.parents and target != root:
+                raise RuntimeError(f"{tgz.name}: unsafe path {member.name}")
+            if member.issym() or member.islnk() or member.isdev():
+                raise RuntimeError(f"{tgz.name}: refusing link/device {member.name}")
+        archive.extractall(dest)
+
+
 def npm_pack_extract(spec: str, dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="gb-npm-"))
     run(["npm", "pack", "--ignore-scripts", "--silent", spec], cwd=tmp)
     tgz = next(tmp.glob("*.tgz"))
-    with tarfile.open(tgz, "r:gz") as archive:
-        archive.extractall(tmp / "ex")
+    want = NPM_INTEGRITY.get(spec)
+    got = "sha512-" + base64.b64encode(hashlib.sha512(tgz.read_bytes()).digest()).decode()
+    if want is None or got != want:
+        raise SystemExit(f"{spec}: tarball integrity {got} does not match pinned {want}")
+    safe_extract(tgz, tmp / "ex")
     pkg = tmp / "ex" / "package"
     if not pkg.is_dir():
         raise RuntimeError(f"npm pack {spec} did not contain package/")
@@ -150,13 +186,11 @@ def main() -> None:
 
     if present("better-sqlite3"):
         tgz = tmp / "bs.tar.gz"
-        download(
-            "https://github.com/WiseLibs/better-sqlite3/releases/download/"
-            "v12.11.1/better-sqlite3-v12.11.1-electron-v146-linux-x64.tar.gz",
-            tgz,
-        )
-        with tarfile.open(tgz, "r:gz") as archive:
-            archive.extractall(tmp / "ex")
+        download(BETTER_SQLITE3_URL, tgz)
+        got = hashlib.sha256(tgz.read_bytes()).hexdigest()
+        if got != BETTER_SQLITE3_SHA256:
+            raise SystemExit(f"better-sqlite3 prebuild SHA-256 {got} does not match pinned value")
+        safe_extract(tgz, tmp / "ex")
         node = next((tmp / "ex").rglob("better_sqlite3.node"))
         dest = DEPS / "better-sqlite3" / "build" / "Release" / "better_sqlite3.node"
         dest.parent.mkdir(parents=True, exist_ok=True)

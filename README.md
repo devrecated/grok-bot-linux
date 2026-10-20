@@ -160,6 +160,12 @@ cryptographically pinned: the updater instead requires HTTPS, allow-lists the
 exact download host and path, and validates the resulting Debian package's
 identity and required contents before installation.
 
+Everything else the build downloads is checked: the Electron zip against
+Electron's published `SHASUMS256.txt`, npm tarballs against pinned registry
+integrity hashes, and appimagetool, the AppImage runtime and the
+better-sqlite3 prebuild against pinned SHA-256 values. Archives are
+extracted without allowing absolute paths, `..` or links.
+
 ## How this compares to the Mac app
 
 | | Official Mac app | This Linux build |

@@ -15,6 +15,11 @@ CACHE="${ROOT}/.cache"
 # Electron is read from the Windows payload unless ELECTRON_VERSION is set.
 ELECTRON_OVERRIDE="${ELECTRON_VERSION:-}"
 NODE_API_HEADERS_VERSION="1.9.0"
+NODE_API_HEADERS_INTEGRITY="sha512-2oNILP4jXwRB4ywnYKjVk1YyJ96n2D4EOVJO6S3oYZ5PtbJrw3Yt9TpAuX3nBLMuzn74rnfGQrv13pS9vC+YiA=="
+APPIMAGETOOL_VERSION="1.9.1"
+APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+APPIMAGE_RUNTIME_VERSION="20251108"
+APPIMAGE_RUNTIME_SHA256="2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
 
 usage() {
   cat <<EOF
@@ -58,6 +63,25 @@ done
 
 die() { echo "error: $*" >&2; exit 1; }
 
+# fetch_pinned <path> <sha256> <url>: download once, verify every time.
+fetch_pinned() {
+  local dest="$1" want="$2" url="$3" got
+  if [[ ! -f "$dest" ]]; then
+    curl -fL --retry 3 -o "${dest}.partial" "$url"
+    mv "${dest}.partial" "$dest"
+  fi
+  got="$(sha256sum "$dest" | awk '{print $1}')"
+  if [[ "$got" != "$want" ]]; then
+    rm -f "$dest"
+    die "$(basename "$dest"): SHA-256 ${got} does not match pinned ${want}; removed it"
+  fi
+}
+
+# npm_integrity_ok <tgz> <sha512-...>
+npm_integrity_ok() {
+  [[ "sha512-$(openssl dgst -sha512 -binary "$1" | base64 -w0)" == "$2" ]]
+}
+
 # Print an install hint for the host's package manager.
 hint() {
   local apt="$1" dnf="$2" pacman="$3"
@@ -86,6 +110,8 @@ need npx npm npm npm
 need gcc build-essential gcc gcc
 need g++ build-essential gcc-c++ gcc
 need python3 python3 python3 python3
+need openssl openssl openssl openssl
+need sha256sum coreutils coreutils coreutils
 if ! command -v 7z >/dev/null && ! command -v 7za >/dev/null; then
   echo "missing required command: 7z" >&2
   hint p7zip-full p7zip-plugins 7zip >&2
@@ -163,6 +189,11 @@ find_node_include() {
     local tmp
     tmp="$(mktemp -d)"
     ( cd "$tmp" && npm pack --silent "node-api-headers@${NODE_API_HEADERS_VERSION}" >/dev/null ) || { rm -rf "$tmp"; return 1; }
+    npm_integrity_ok "$tmp"/node-api-headers-*.tgz "$NODE_API_HEADERS_INTEGRITY" || {
+      echo "node-api-headers tarball does not match its pinned integrity" >&2
+      rm -rf "$tmp"
+      return 1
+    }
     mkdir -p "${CACHE}/node-api-headers-${NODE_API_HEADERS_VERSION}"
     tar -xzf "$tmp"/node-api-headers-*.tgz -C "${CACHE}/node-api-headers-${NODE_API_HEADERS_VERSION}"
     rm -rf "$tmp"
@@ -247,12 +278,25 @@ echo "Formats           : $(printf '%s ' "${!WANT[@]}")"
 echo "Workdir           : $WORKDIR"
 
 EL_ZIP="${CACHE}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
+EL_SUMS="${CACHE}/electron-v${ELECTRON_VERSION}-SHASUMS256.txt"
+EL_BASE="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}"
 mkdir -p "$CACHE"
+if [[ ! -f "$EL_SUMS" ]]; then
+  curl -fsSL --retry 3 -o "${EL_SUMS}.partial" "${EL_BASE}/SHASUMS256.txt"
+  mv "${EL_SUMS}.partial" "$EL_SUMS"
+fi
 if [[ ! -f "$EL_ZIP" ]]; then
-  curl -fL --retry 3 -o "${EL_ZIP}.partial" \
-    "https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
+  curl -fL --retry 3 -o "${EL_ZIP}.partial" "${EL_BASE}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
   mv "${EL_ZIP}.partial" "$EL_ZIP"
 fi
+# Electron publishes SHA-256 sums for every release asset.
+el_want="$(awk -v f="electron-v${ELECTRON_VERSION}-linux-x64.zip" '$2 == f || $2 == "*" f { print $1 }' "$EL_SUMS")"
+el_got="$(sha256sum "$EL_ZIP" | awk '{print $1}')"
+if [[ -z "$el_want" || "$el_got" != "$el_want" ]]; then
+  rm -f "$EL_ZIP"
+  die "Electron zip SHA-256 ${el_got} does not match SHASUMS256.txt (${el_want:-missing}); removed the cached copy"
+fi
+echo "Electron zip      : sha256 ok"
 EL="${WORKDIR}/electron"
 mkdir -p "$EL"
 unzip -q "$EL_ZIP" -d "$EL"
@@ -371,14 +415,16 @@ EOF
   cp "${APPDIR}/grok-bot.desktop" "${APPDIR}/usr/share/applications/"
   install -m 0755 "${ROOT}/packaging/AppRun" "${APPDIR}/AppRun"
 
-  TOOL="${CACHE}/appimagetool"
-  if [[ ! -x "$TOOL" ]]; then
-    curl -fL --retry 3 -o "$TOOL" \
-      "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
-    chmod +x "$TOOL"
-  fi
+  # Pinned releases; "continuous" builds change under the same URL.
+  TOOL="${CACHE}/appimagetool-${APPIMAGETOOL_VERSION}-x86_64.AppImage"
+  RUNTIME="${CACHE}/appimage-runtime-${APPIMAGE_RUNTIME_VERSION}-x86_64"
+  fetch_pinned "$TOOL" "$APPIMAGETOOL_SHA256" \
+    "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
+  fetch_pinned "$RUNTIME" "$APPIMAGE_RUNTIME_SHA256" \
+    "https://github.com/AppImage/type2-runtime/releases/download/${APPIMAGE_RUNTIME_VERSION}/runtime-x86_64"
+  chmod +x "$TOOL"
   APPIMAGE="${DIST}/Grok_Bot_${VERSION}_x86_64.AppImage"
-  if ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" "$APPIMAGE"; then
+  if ARCH=x86_64 "$TOOL" --appimage-extract-and-run --runtime-file "$RUNTIME" "$APPDIR" "$APPIMAGE"; then
     chmod +x "$APPIMAGE"
     echo "appimage $APPIMAGE"
   elif [[ "$EXPLICIT" -eq 1 ]]; then

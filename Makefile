@@ -1,7 +1,7 @@
 PREFIX ?= /usr/local
 UPDATER_BIN ?= $(HOME)/.local/bin/grok-bot-update
 
-.PHONY: help detect build run update install-deb install-updater install-official clean install-user uninstall-user
+.PHONY: help detect build run update install-deb install-updater install-official clean install-user uninstall-user test
 
 help:
 	@echo "Grok Bot Linux port"
@@ -10,6 +10,7 @@ help:
 	@echo "  make build        Rebuild that version for Linux (tarball, .deb, AppImage)"
 	@echo "                    FORMATS=tar,deb,appimage picks formats (default: all this host can build)"
 	@echo "  make update       Build and install only when a newer version exists"
+	@echo "  make test         Smoke-test the staged build (native addons + Xvfb launch)"
 	@echo "  make run          Launch the staged app from dist/"
 	@echo "  make install-deb  Alias for make update"
 	@echo "  make install-updater  Add grok-bot-update to ~/.local/bin"
@@ -23,6 +24,9 @@ detect:
 
 build:
 	./scripts/build.sh $(if $(FORMATS),--formats $(FORMATS))
+
+test:
+	./scripts/smoke-test.sh
 
 run:
 	@version="$$(./scripts/detect-version.sh)"; \

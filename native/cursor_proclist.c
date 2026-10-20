@@ -11,8 +11,9 @@
  *   cursor_proclist_system_memory()
  *     -> { totalBytes, availableBytes, pressureLevel? } | null
  *
- * This file reads /proc so the Linux port actually lists processes
- * instead of shipping an empty stub.
+ * The /proc walk runs on the libuv thread pool so a scan never blocks the
+ * Electron main process; only building the result array happens on the
+ * JavaScript thread.
  */
 
 #include <ctype.h>
@@ -24,8 +25,8 @@
 
 #include <node_api.h>
 
-#define MAX_PROCS 8192
 #define MAX_ROOTS 64
+#define CMDLINE_MAX 16384
 
 typedef struct {
   int pid;
@@ -34,8 +35,19 @@ typedef struct {
   unsigned long long utime;
   unsigned long long stime;
   unsigned long rss_pages;
-  char argv[1024];
+  char *argv; /* heap, NUL-terminated, may be "" */
+  signed char keep; /* -1 unknown, 0 no, 1 yes */
 } proc_row;
+
+typedef struct {
+  napi_async_work work;
+  napi_deferred deferred;
+  int roots[MAX_ROOTS];
+  int nroots;
+  proc_row *rows;
+  size_t nrows;
+  int failed;
+} scan_job;
 
 static int read_file(const char *path, char *buf, size_t buflen) {
   FILE *f = fopen(path, "r");
@@ -57,11 +69,8 @@ static int parse_stat(int pid, proc_row *row) {
   }
 
   char *rparen = strrchr(buf, ')');
-  if (!rparen) {
-    return -1;
-  }
   char *lparen = strchr(buf, '(');
-  if (!lparen || lparen >= rparen) {
+  if (!rparen || !lparen || lparen >= rparen) {
     return -1;
   }
 
@@ -92,14 +101,18 @@ static int parse_stat(int pid, proc_row *row) {
   return 0;
 }
 
-static void read_cmdline(int pid, char *out, size_t outlen) {
+/* Full command line with NUL separators turned into spaces. */
+static char *read_cmdline(int pid) {
   char path[64];
-  char buf[1024];
   snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
-  int n = read_file(path, buf, sizeof(buf));
+  char *buf = malloc(CMDLINE_MAX);
+  if (!buf) {
+    return NULL;
+  }
+  int n = read_file(path, buf, CMDLINE_MAX);
   if (n <= 0) {
-    out[0] = '\0';
-    return;
+    buf[0] = '\0';
+    return buf;
   }
   for (int i = 0; i < n; i++) {
     if (buf[i] == '\0') {
@@ -107,49 +120,97 @@ static void read_cmdline(int pid, char *out, size_t outlen) {
     }
   }
   while (n > 0 && buf[n - 1] == ' ') {
-    n--;
-    buf[n] = '\0';
+    buf[--n] = '\0';
   }
-  strncpy(out, buf, outlen - 1);
-  out[outlen - 1] = '\0';
+  return buf;
 }
 
-static int is_descendant(int pid, const int *roots, int nroots,
-                         const proc_row *rows, int nrows) {
-  if (nroots <= 0) {
-    return 1;
-  }
-  for (int depth = 0; depth < 64 && pid > 0; depth++) {
-    for (int i = 0; i < nroots; i++) {
-      if (pid == roots[i]) {
-        return 1;
-      }
+static int cmp_pid(const void *a, const void *b) {
+  int pa = ((const proc_row *)a)->pid;
+  int pb = ((const proc_row *)b)->pid;
+  return (pa > pb) - (pa < pb);
+}
+
+static proc_row *find_row(proc_row *rows, size_t nrows, int pid) {
+  proc_row key;
+  key.pid = pid;
+  return bsearch(&key, rows, nrows, sizeof(proc_row), cmp_pid);
+}
+
+static int is_root(const scan_job *job, int pid) {
+  for (int i = 0; i < job->nroots; i++) {
+    if (job->roots[i] == pid) {
+      return 1;
     }
-    int ppid = 0;
-    int found = 0;
-    for (int i = 0; i < nrows; i++) {
-      if (rows[i].pid == pid) {
-        ppid = rows[i].ppid;
-        found = 1;
-        break;
-      }
-    }
-    if (!found) {
-      break;
-    }
-    pid = ppid;
   }
   return 0;
 }
 
-static int collect_procs(proc_row *rows, int max_rows) {
+/*
+ * Mark every row that is a root or descends from one. Each row is decided
+ * once: walk up until a decided ancestor (or a root, or the top), then
+ * write the answer back down the walked chain. Linear in the process count.
+ */
+static void mark_descendants(scan_job *job) {
+  size_t chain_cap = 64;
+  size_t *chain = malloc(chain_cap * sizeof(size_t));
+  if (!chain) {
+    job->failed = 1;
+    return;
+  }
+  for (size_t i = 0; i < job->nrows; i++) {
+    size_t depth = 0;
+    proc_row *cur = &job->rows[i];
+    signed char verdict = 0;
+    while (cur) {
+      if (cur->keep >= 0) {
+        verdict = cur->keep;
+        break;
+      }
+      if (is_root(job, cur->pid)) {
+        cur->keep = 1;
+        verdict = 1;
+        break;
+      }
+      if (depth == chain_cap) {
+        size_t *grown = realloc(chain, chain_cap * 2 * sizeof(size_t));
+        if (!grown) {
+          job->failed = 1;
+          free(chain);
+          return;
+        }
+        chain = grown;
+        chain_cap *= 2;
+      }
+      chain[depth++] = (size_t)(cur - job->rows);
+      if (cur->ppid <= 0 || cur->ppid == cur->pid) {
+        break;
+      }
+      cur = find_row(job->rows, job->nrows, cur->ppid);
+    }
+    for (size_t d = 0; d < depth; d++) {
+      job->rows[chain[d]].keep = verdict;
+    }
+  }
+  free(chain);
+}
+
+static void ScanExecute(napi_env env, void *data) {
+  (void)env;
+  scan_job *job = data;
   DIR *dir = opendir("/proc");
   if (!dir) {
-    return 0;
+    return;
   }
-  int count = 0;
+  size_t cap = 1024;
+  job->rows = calloc(cap, sizeof(proc_row));
+  if (!job->rows) {
+    job->failed = 1;
+    closedir(dir);
+    return;
+  }
   struct dirent *ent;
-  while ((ent = readdir(dir)) != NULL && count < max_rows) {
+  while ((ent = readdir(dir)) != NULL) {
     if (!isdigit((unsigned char)ent->d_name[0])) {
       continue;
     }
@@ -157,13 +218,99 @@ static int collect_procs(proc_row *rows, int max_rows) {
     if (pid <= 0) {
       continue;
     }
-    if (parse_stat(pid, &rows[count]) == 0) {
-      read_cmdline(pid, rows[count].argv, sizeof(rows[count].argv));
-      count++;
+    if (job->nrows == cap) {
+      proc_row *grown = realloc(job->rows, cap * 2 * sizeof(proc_row));
+      if (!grown) {
+        job->failed = 1;
+        break;
+      }
+      job->rows = grown;
+      cap *= 2;
+    }
+    proc_row *row = &job->rows[job->nrows];
+    memset(row, 0, sizeof(*row));
+    if (parse_stat(pid, row) == 0) {
+      row->argv = read_cmdline(pid);
+      row->keep = job->nroots > 0 ? -1 : 1;
+      job->nrows++;
     }
   }
   closedir(dir);
-  return count;
+  if (job->failed) {
+    return;
+  }
+  qsort(job->rows, job->nrows, sizeof(proc_row), cmp_pid);
+  if (job->nroots > 0) {
+    mark_descendants(job);
+  }
+}
+
+static void free_job(scan_job *job) {
+  if (job->rows) {
+    for (size_t i = 0; i < job->nrows; i++) {
+      free(job->rows[i].argv);
+    }
+    free(job->rows);
+  }
+  free(job);
+}
+
+static void ScanComplete(napi_env env, napi_status status, void *data) {
+  scan_job *job = data;
+  if (status != napi_ok || job->failed) {
+    napi_value msg, err;
+    napi_create_string_utf8(env, "cursor_proclist: scan failed",
+                            NAPI_AUTO_LENGTH, &msg);
+    napi_create_error(env, NULL, msg, &err);
+    napi_reject_deferred(env, job->deferred, err);
+    napi_delete_async_work(env, job->work);
+    free_job(job);
+    return;
+  }
+
+  long hz = sysconf(_SC_CLK_TCK);
+  if (hz <= 0) {
+    hz = 100;
+  }
+  long page = sysconf(_SC_PAGESIZE);
+  if (page <= 0) {
+    page = 4096;
+  }
+
+  napi_value result;
+  napi_create_array(env, &result);
+  uint32_t out_i = 0;
+  for (size_t i = 0; i < job->nrows; i++) {
+    proc_row *r = &job->rows[i];
+    if (r->keep != 1) {
+      continue;
+    }
+    napi_value tuple, v;
+    napi_create_array_with_length(env, 9, &tuple);
+    napi_create_int32(env, r->pid, &v);
+    napi_set_element(env, tuple, 0, v);
+    napi_create_int32(env, r->ppid, &v);
+    napi_set_element(env, tuple, 1, v);
+    napi_create_string_utf8(env, r->name, NAPI_AUTO_LENGTH, &v);
+    napi_set_element(env, tuple, 2, v);
+    napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &v);
+    napi_set_element(env, tuple, 3, v);
+    napi_create_double(env, (double)(r->utime + r->stime) * 1000.0 / (double)hz,
+                       &v);
+    napi_set_element(env, tuple, 4, v);
+    napi_create_double(
+        env, (double)r->rss_pages * (double)page / (1024.0 * 1024.0), &v);
+    napi_set_element(env, tuple, 5, v);
+    napi_create_string_utf8(env, r->argv ? r->argv : "", NAPI_AUTO_LENGTH, &v);
+    napi_set_element(env, tuple, 6, v);
+    napi_get_null(env, &v);
+    napi_set_element(env, tuple, 7, v);
+    napi_set_element(env, tuple, 8, v);
+    napi_set_element(env, result, out_i++, tuple);
+  }
+  napi_resolve_deferred(env, job->deferred, result);
+  napi_delete_async_work(env, job->work);
+  free_job(job);
 }
 
 static napi_value ScanAsync(napi_env env, napi_callback_info info) {
@@ -171,8 +318,11 @@ static napi_value ScanAsync(napi_env env, napi_callback_info info) {
   napi_value argv[1];
   napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
 
-  int roots[MAX_ROOTS];
-  int nroots = 0;
+  scan_job *job = calloc(1, sizeof(scan_job));
+  if (!job) {
+    napi_throw_error(env, NULL, "out of memory");
+    return NULL;
+  }
   if (argc >= 1) {
     bool is_array = false;
     napi_is_array(env, argv[0], &is_array);
@@ -187,73 +337,24 @@ static napi_value ScanAsync(napi_env env, napi_callback_info info) {
         int32_t pid = 0;
         napi_get_element(env, argv[0], i, &item);
         if (napi_get_value_int32(env, item, &pid) == napi_ok && pid > 0) {
-          roots[nroots++] = pid;
+          job->roots[job->nroots++] = pid;
         }
       }
     }
   }
 
-  proc_row *rows = calloc(MAX_PROCS, sizeof(proc_row));
-  if (!rows) {
-    napi_throw_error(env, NULL, "out of memory");
+  napi_value promise, name;
+  if (napi_create_promise(env, &job->deferred, &promise) != napi_ok) {
+    free(job);
     return NULL;
   }
-  int nrows = collect_procs(rows, MAX_PROCS);
-
-  long hz = sysconf(_SC_CLK_TCK);
-  if (hz <= 0) {
-    hz = 100;
-  }
-  long page = sysconf(_SC_PAGESIZE);
-  if (page <= 0) {
-    page = 4096;
-  }
-
-  napi_value result;
-  napi_create_array(env, &result);
-  uint32_t out_i = 0;
-  for (int i = 0; i < nrows; i++) {
-    if (!is_descendant(rows[i].pid, roots, nroots, rows, nrows)) {
-      continue;
-    }
-    napi_value tuple;
-    napi_create_array_with_length(env, 9, &tuple);
-
-    napi_value v_pid, v_ppid, v_name, v_ext, v_cpu, v_mem, v_argv, v_owner,
-        v_req;
-    napi_create_int32(env, rows[i].pid, &v_pid);
-    napi_create_int32(env, rows[i].ppid, &v_ppid);
-    napi_create_string_utf8(env, rows[i].name, NAPI_AUTO_LENGTH, &v_name);
-    napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &v_ext);
-    double cpu_ms =
-        (double)(rows[i].utime + rows[i].stime) * 1000.0 / (double)hz;
-    napi_create_double(env, cpu_ms, &v_cpu);
-    double mem_mb =
-        (double)rows[i].rss_pages * (double)page / (1024.0 * 1024.0);
-    napi_create_double(env, mem_mb, &v_mem);
-    napi_create_string_utf8(env, rows[i].argv, NAPI_AUTO_LENGTH, &v_argv);
-    napi_get_null(env, &v_owner);
-    napi_get_null(env, &v_req);
-
-    napi_set_element(env, tuple, 0, v_pid);
-    napi_set_element(env, tuple, 1, v_ppid);
-    napi_set_element(env, tuple, 2, v_name);
-    napi_set_element(env, tuple, 3, v_ext);
-    napi_set_element(env, tuple, 4, v_cpu);
-    napi_set_element(env, tuple, 5, v_mem);
-    napi_set_element(env, tuple, 6, v_argv);
-    napi_set_element(env, tuple, 7, v_owner);
-    napi_set_element(env, tuple, 8, v_req);
-    napi_set_element(env, result, out_i++, tuple);
-  }
-  free(rows);
-
-  napi_deferred deferred;
-  napi_value promise;
-  if (napi_create_promise(env, &deferred, &promise) != napi_ok) {
+  napi_create_string_utf8(env, "cursor_proclist_scan", NAPI_AUTO_LENGTH, &name);
+  if (napi_create_async_work(env, NULL, name, ScanExecute, ScanComplete, job,
+                             &job->work) != napi_ok ||
+      napi_queue_async_work(env, job->work) != napi_ok) {
+    napi_throw_error(env, NULL, "cursor_proclist: could not queue scan");
     return NULL;
   }
-  napi_resolve_deferred(env, deferred, result);
   return promise;
 }
 

@@ -8,7 +8,9 @@ modules are compiled from native/ in this repository.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -88,6 +90,54 @@ def present(rel: str) -> bool:
     return (DEPS / rel).exists()
 
 
+# Addons this script knows how to replace. Anything else listed as required
+# in the payload's runtime-deps-manifest.json is a new private addon that
+# needs a Linux implementation before the build can be trusted.
+HANDLED = {
+    "better-sqlite3",
+    "tree-sitter",
+    "tree-sitter-bash",
+    "whichlang-node",
+    "cursor-proclist",
+    "@anysphere/tree-chunk-napi",
+    "sand-notification-settings",
+}
+
+
+def exported_names(index_js: Path) -> list[str]:
+    """Best-effort list of binding functions a wrapper index.js re-exports."""
+    try:
+        text = index_js.read_text(errors="replace")
+    except OSError:
+        return []
+    return sorted(set(re.findall(r"binding\.([A-Za-z_][A-Za-z0-9_]*)", text)))
+
+
+def check_manifest() -> None:
+    assert DEPS is not None
+    manifest = DEPS / "runtime-deps-manifest.json"
+    if not manifest.is_file():
+        return
+    try:
+        required = json.loads(manifest.read_text()).get("required", [])
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"cannot read {manifest}: {exc}")
+    unknown = [name for name in required if name not in HANDLED]
+    if not unknown:
+        return
+    lines = [
+        "This Grok Bot release needs native addons the Linux port does not know yet:",
+    ]
+    for name in unknown:
+        names = exported_names(DEPS / name / "index.js")
+        api = ", ".join(names) if names else "see its index.js"
+        lines.append(f"  - {name} (exports: {api})")
+    lines.append(
+        "Add a Linux implementation in native/ and a case in scripts/fix-natives.py."
+    )
+    raise SystemExit("\n".join(lines))
+
+
 def main() -> None:
     global DEPS
     unpacked = Path(os.environ["GROKBOT_UNPACKED"])
@@ -164,6 +214,22 @@ def main() -> None:
         print("tree-chunk-napi stub")
     else:
         print("skip tree-chunk-napi (not in payload)")
+
+    if present("sand-notification-settings"):
+        compile_native(
+            native / "sand_notification_settings.c",
+            DEPS
+            / "sand-notification-settings"
+            / "build"
+            / "Release"
+            / "sand_notification_settings.node",
+            "sand_notification_settings",
+        )
+        print("sand-notification-settings linux addon (resolves null)")
+    else:
+        print("skip sand-notification-settings (not in payload)")
+
+    check_manifest()
 
     live_pe: list[str] = []
     for path in DEPS.rglob("*.node"):

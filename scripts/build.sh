@@ -190,6 +190,9 @@ npx --yes @electron/asar pack "$ASAR_TMP" "${STAGE}/resources/app.asar"
 ICON="$(find "$ASAR_TMP" "${STAGE}/resources" -name 'app-icon*.png' 2>/dev/null | head -1 || true)"
 if [[ -n "${ICON}" && -f "$ICON" ]]; then
   cp "$ICON" "${STAGE}/grok-bot.png"
+  # The main process loads resources/icon.png for the window, tray and
+  # notifications on Linux; the Windows payload uses an .ico instead.
+  cp "$ICON" "${STAGE}/resources/icon.png"
 fi
 
 find "${STAGE}" -type d -exec chmod 755 {} +

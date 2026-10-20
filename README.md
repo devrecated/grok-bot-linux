@@ -106,6 +106,12 @@ updates write only ignored files under `.cache/` and `dist/`; they do not edit
 the checkout or require a Git commit. Repository changes are needed only when
 Cursor changes the app packaging, Electron ABI, or native dependencies.
 
+If a new release adds a native addon the port doesn't handle yet, the build
+stops and names it and its exported functions, instead of producing an app
+that fails at startup. Addons are listed in the payload's
+`runtime-deps-manifest.json`. Each one needs a Linux implementation in
+`native/` and a case in `scripts/fix-natives.py`.
+
 The updater retains the installed `.deb` and at most one previous `.deb` for
 rollback, and removes superseded cached upstream installers. Cursor's update
 response currently does not provide a checksum, so the installer cannot be

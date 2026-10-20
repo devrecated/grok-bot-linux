@@ -36,6 +36,24 @@ The rebuild below still works and is useful when you want to pin or audit a
 specific version, build offline from an installer you already have, or
 patch the app yourself.
 
+## Quick install
+
+One command clones this repository and runs its install pipeline:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devrecated/grok-bot-linux/main/scripts/install.sh | bash
+```
+
+It installs Cursor's official Linux build when one exists for your machine, verified against Cursor's signed package metadata, and otherwise falls back to the from-source rebuild. It installs the build dependencies it needs along the way. Piping a script to `bash` runs it with your account's privileges, so read [`scripts/install.sh`](scripts/install.sh) first if you want to see what it does.
+
+The checkout stays in `~/.local/share/grok-bot-linux/src`; re-run the command, or `grok-bot-update`, to update. A few environment variables change its behavior:
+
+- `GROK_BOT_LINUX_MODE=official|source|auto` picks the install path (default `auto`).
+- `GROK_BOT_LINUX_SRC=DIR` sets the checkout directory.
+- `GROK_BOT_LINUX_NO_DEPS=1` skips installing dependencies.
+
+Like every path in this repo, the installer fetches the official app at install time and never bundles or re-hosts it.
+
 ## What you get
 
 The official Grok Bot UI — bots, the shared computer, sign-in with your
@@ -118,6 +136,18 @@ install, so the launcher adds `--no-sandbox`):
 make install-user      # ~/.local/share/grok-bot-unofficial + ~/.local/bin/grok-bot
 make uninstall-user
 ```
+
+
+### Arch Linux (AUR)
+
+A `grok-bot-linux` PKGBUILD lives in [`packaging/aur`](packaging/aur). It downloads the official AppImage and verifies it against Cursor's published SHA-256 during the build on your own machine, then installs it with a menu entry and the `grokbot://` / `sand://` link handlers. It redistributes nothing proprietary; only the verified download happens at build time.
+
+```bash
+cd packaging/aur
+makepkg -si
+```
+
+Once it is published to the AUR, an AUR helper installs it directly, for example `yay -S grok-bot-linux`.
 
 ## Older Macs (macOS 11 Big Sur)
 

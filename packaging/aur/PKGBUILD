@@ -1,0 +1,78 @@
+# Maintainer: Adam Siwiec <73085927+adamsiwiec1@users.noreply.github.com>
+#
+# grok-bot-linux: installs Cursor's official Grok Bot Linux build on Arch.
+#
+# This package redistributes nothing proprietary. The official AppImage is
+# downloaded from Cursor and verified against Cursor's published SHA-256 during
+# build() on the user's own machine, using the hardened script from
+# github.com/devrecated/grok-bot-linux. Only that script (MIT-licensed) is a
+# declared source; xAI's app is never bundled or re-hosted.
+pkgname=grok-bot-linux
+pkgver=0
+pkgrel=1
+pkgdesc="Grok Bot desktop app for Linux (fetches and verifies Cursor's official AppImage at build time)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/devrecated/grok-bot-linux"
+license=('MIT')
+depends=('fuse2' 'gtk3' 'nss' 'alsa-lib')
+makedepends=('git' 'curl' 'python' 'gnupg')
+provides=('grok-bot')
+conflicts=('grok-bot')
+options=(!strip !debug)
+# Pin the helper scripts to a commit when you cut a release; main is used here.
+source=("${pkgname}-helper::git+https://github.com/devrecated/grok-bot-linux.git#branch=main")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${srcdir}/${pkgname}-helper"
+  ./scripts/detect-version.sh
+}
+
+build() {
+  cd "${srcdir}/${pkgname}-helper"
+  # Download and verify the official AppImage; nothing is installed yet.
+  mkdir -p "${srcdir}/app"
+  ./scripts/install-official.sh --format appimage --download-only "${srcdir}/app"
+}
+
+package() {
+  local appimage
+  appimage="$(find "${srcdir}/app" -maxdepth 1 -name '*.AppImage' -print -quit)"
+  [ -n "$appimage" ] || { echo "no AppImage was downloaded" >&2; return 1; }
+
+  install -Dm0755 "$appimage" "${pkgdir}/opt/${pkgname}/Grok_Bot.AppImage"
+
+  # Extract the bundled hicolor icons and .desktop metadata from the AppImage
+  # (--appimage-extract needs no FUSE), so the menu entry matches upstream.
+  ( cd "${srcdir}" && "${pkgdir}/opt/${pkgname}/Grok_Bot.AppImage" --appimage-extract >/dev/null 2>&1 ) || true
+  if [ -d "${srcdir}/squashfs-root/usr/share/icons/hicolor" ]; then
+    cp -r "${srcdir}/squashfs-root/usr/share/icons/hicolor" "${pkgdir}/usr/share/icons/" 2>/dev/null || true
+  fi
+
+  # Launcher wrapper. Keeps Chromium's sandbox on; adds --no-sandbox only when
+  # unprivileged user namespaces are unavailable (some containers).
+  install -d "${pkgdir}/usr/bin"
+  cat > "${pkgdir}/usr/bin/grok-bot" <<'WRAP'
+#!/usr/bin/env bash
+set -euo pipefail
+app="/opt/grok-bot-linux/Grok_Bot.AppImage"
+sandbox=""
+unshare --user true 2>/dev/null || sandbox="--no-sandbox"
+exec "$app" $sandbox --ozone-platform-hint=auto "$@"
+WRAP
+  chmod 0755 "${pkgdir}/usr/bin/grok-bot"
+
+  install -Dm0644 /dev/stdin "${pkgdir}/usr/share/applications/grok-bot.desktop" <<'DESKTOP'
+[Desktop Entry]
+Name=Grok Bot
+Exec=grok-bot %U
+Icon=grok-bot
+Type=Application
+Categories=Development;Utility;
+StartupWMClass=grok-bot
+MimeType=x-scheme-handler/grokbot;x-scheme-handler/sand;
+DESKTOP
+
+  install -Dm0644 "${srcdir}/${pkgname}-helper/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

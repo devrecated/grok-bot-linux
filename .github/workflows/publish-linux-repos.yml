@@ -1,0 +1,56 @@
+# Build the grok-bot-linux helper .deb/.rpm and publish the apt + dnf
+# repository to the gh-pages branch of this repo.
+#
+# The packages contain only MIT-licensed scripts. Cursor's official Grok Bot
+# build is never downloaded or bundled here; users fetch it at install time
+# via grok-bot-linux-setup.
+name: Publish Linux repos
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packaging/**"
+      - "scripts/install-official.sh"
+      - ".github/workflows/publish-linux-repos.yml"
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq apt-utils createrepo-c rpm fakeroot gzip
+
+      - name: Build helper .deb and .rpm
+        run: |
+          set -euo pipefail
+          mkdir -p dist/linux-repos
+          ./packaging/apt/build-deb.sh dist/linux-repos
+          ./packaging/dnf/build-rpm.sh dist/linux-repos
+          ls -la dist/linux-repos
+
+      - name: Build GitHub Pages apt + dnf tree
+        run: |
+          set -euo pipefail
+          ./packaging/repo/build-pages-repos.sh dist/linux-repos dist/gh-pages
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: dist/gh-pages
+          publish_branch: gh-pages
+          force_orphan: true
+          enable_jekyll: false

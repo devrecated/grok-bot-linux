@@ -1,0 +1,46 @@
+Name:           grok-bot-linux
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Helper that installs Cursor's official Grok Bot on Linux
+License:        MIT
+URL:            https://github.com/devrecated/grok-bot-linux
+BuildArch:      noarch
+Requires:       curl python3 ca-certificates coreutils
+Recommends:     gnupg2
+
+%description
+Ships the MIT-licensed install scripts from grok-bot-linux. Run
+grok-bot-linux-setup after installing to download and verify Cursor's
+official .deb, .rpm, or AppImage. The package never redistributes
+xAI or Cursor binaries.
+
+This is an unofficial community project and is not affiliated with xAI
+or Cursor.
+
+%prep
+
+%install
+rm -rf %{buildroot}
+mkdir -p %{buildroot}
+cp -a %{stagedir}/. %{buildroot}/
+
+%files
+/usr/lib/grok-bot-linux
+/usr/bin/grok-bot-linux-setup
+/usr/share/doc/grok-bot-linux
+
+%post
+cat <<'MSG'
+grok-bot-linux: helper scripts installed.
+
+This package does not contain Grok Bot. To download and verify Cursor's
+official Linux build, run:
+
+  sudo grok-bot-linux-setup
+
+Or, for a specific format: sudo grok-bot-linux-setup --format appimage
+MSG
+
+%changelog
+* Tue Oct 20 2026 Adam Siwiec <73085927+adamsiwiec1@users.noreply.github.com> - @VERSION@-1
+- Initial helper package (scripts only; official build fetched at setup time)

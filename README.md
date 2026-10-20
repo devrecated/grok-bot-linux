@@ -48,6 +48,8 @@ curl -fsSL https://raw.githubusercontent.com/devrecated/grok-bot-linux/main/scri
 
 It installs Cursor's official Linux build when one exists for your machine, verified against Cursor's signed package metadata, and otherwise falls back to the from-source rebuild. It installs the build dependencies it needs along the way. Piping a script to `bash` runs it with your account's privileges, so read [`scripts/install.sh`](scripts/install.sh) first if you want to see what it does.
 
+On Debian/Ubuntu or Fedora/RHEL you can also install through apt or dnf. Those paths ship a tiny helper package (scripts only) and then fetch the official build; see [Debian / Ubuntu (apt)](#debian--ubuntu-apt) and [Fedora / RHEL (dnf)](#fedora--rhel-dnf) below. Arch users can use the [AUR PKGBUILD](#arch-linux-aur).
+
 The checkout stays in `~/.local/share/grok-bot-linux/src`; re-run the command, or `grok-bot-update`, to update. A few environment variables change its behavior:
 
 - `GROK_BOT_LINUX_MODE=official|source|auto` picks the install path (default `auto`).
@@ -150,6 +152,43 @@ makepkg -si
 ```
 
 Once it is published to the AUR, an AUR helper installs it directly, for example `yay -S grok-bot-linux`.
+
+### Debian / Ubuntu (apt)
+
+A small helper package lives on GitHub Pages. It installs only the MIT-licensed scripts from this repo. After that, `grok-bot-linux-setup` downloads Cursor's official build, checks it against Cursor's signed package metadata, and installs it. The `.deb` never contains `app.asar` or any other xAI binary.
+
+```bash
+curl -fsSL https://devrecated.github.io/grok-bot-linux/install-apt.sh | sudo bash
+```
+
+Or add the repo yourself and run setup when you are ready:
+
+```bash
+curl -fsSL https://devrecated.github.io/grok-bot-linux/grok-bot-linux.list \
+  | sudo tee /etc/apt/sources.list.d/grok-bot-linux.list
+sudo apt-get update
+sudo apt-get install grok-bot-linux
+sudo grok-bot-linux-setup
+```
+
+### Fedora / RHEL (dnf)
+
+Same helper package, packaged as a noarch `.rpm`. The one-liner adds the dnf repo, installs the helper, and runs setup:
+
+```bash
+curl -fsSL https://devrecated.github.io/grok-bot-linux/install-dnf.sh | sudo bash
+```
+
+Or manually:
+
+```bash
+curl -fsSL https://devrecated.github.io/grok-bot-linux/grok-bot-linux.repo \
+  | sudo tee /etc/yum.repos.d/grok-bot-linux.repo
+sudo dnf install grok-bot-linux
+sudo grok-bot-linux-setup
+```
+
+The apt and dnf site is published from this repository's `gh-pages` branch by the `publish-linux-repos` workflow. Build the packages locally with `make linux-packages` or the full Pages tree with `make linux-repos`.
 
 ## Older Macs (macOS 11 Big Sur)
 

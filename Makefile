@@ -1,7 +1,7 @@
 PREFIX ?= /usr/local
 UPDATER_BIN ?= $(HOME)/.local/bin/grok-bot-update
 
-.PHONY: help detect build run update install-deb install-updater install-official clean install-user uninstall-user test mac mac-install
+.PHONY: help detect build run update install-deb install-updater install-official clean install-user uninstall-user test mac mac-install linux-packages linux-repos
 
 help:
 	@echo "Grok Bot Linux port"
@@ -19,6 +19,8 @@ help:
 	@echo "  make uninstall-user   Remove that user install"
 	@echo "  make mac          macOS 11 only: rebuild the Mac app on Electron 37 (dist/macos)"
 	@echo "  make mac-install  Same, then copy Grok Bot.app to /Applications"
+	@echo "  make linux-packages  Build helper .deb + .rpm (scripts only, no xAI binaries)"
+	@echo "  make linux-repos     Build apt + dnf GitHub Pages tree under dist/gh-pages"
 	@echo "  make clean        Remove dist/ (keeps .cache/ downloads)"
 
 detect:
@@ -63,3 +65,11 @@ mac-install:
 
 clean:
 	rm -rf dist
+
+linux-packages:
+	mkdir -p dist/linux-repos
+	./packaging/apt/build-deb.sh dist/linux-repos
+	./packaging/dnf/build-rpm.sh dist/linux-repos
+
+linux-repos: linux-packages
+	./packaging/repo/build-pages-repos.sh dist/linux-repos dist/gh-pages

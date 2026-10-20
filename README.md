@@ -2,6 +2,10 @@
 
 Unofficial Ubuntu/Linux build of the **Grok Bot** desktop app.
 
+Originally written by [@jakob-bu](https://github.com/jakob-bu) —
+see the [original repository](https://github.com/jakob-bu/grok-bot-linux-unofficial).
+This is the community-maintained continuation under the [Devrecated](https://github.com/devrecated) org.
+
 Cursor originally shipped Grok Bot for macOS and Windows only. This repo does the same
 thing the [Codex Mac-to-Linux port](https://github.com/ilysenko/codex-desktop-linux)
 did: take the official Electron app, put it on a Linux Electron runtime,

@@ -85,10 +85,22 @@ IFS=$'\t' read -r LATEST_VERSION INSTALLER_URL \
 }
 
 INSTALLED_VERSION=""
-if installed_line="$(dpkg-query -W -f='${db:Status-Abbrev}\t${Version}\n' \
+INSTALLED_MAINTAINER=""
+if installed_line="$(dpkg-query -W -f='${db:Status-Abbrev}\t${Version}\t${Maintainer}\n' \
     grok-bot 2>/dev/null)"; then
-  read -r status INSTALLED_VERSION <<<"$installed_line"
-  [[ "$status" == "ii"* ]] || INSTALLED_VERSION=""
+  IFS=$'\t' read -r status INSTALLED_VERSION INSTALLED_MAINTAINER <<<"$installed_line"
+  status="${status// /}"
+  [[ "$status" == "ii"* ]] || { INSTALLED_VERSION=""; INSTALLED_MAINTAINER=""; }
+fi
+
+# Cursor's official grok-bot package uses the same package name. It updates
+# through its own signed apt repository, so never replace it with a rebuild.
+if [[ -n "$INSTALLED_VERSION" && \
+      "$INSTALLED_MAINTAINER" != "grok-bot-linux contributors" ]]; then
+  echo "Installed : ${INSTALLED_VERSION} (official package, ${INSTALLED_MAINTAINER})"
+  echo "The official Grok Bot package is installed and updates through apt."
+  echo "Not replacing it with a rebuild. Use: sudo apt update && sudo apt upgrade"
+  exit 0
 fi
 
 echo "Installed : ${INSTALLED_VERSION:-not installed}"

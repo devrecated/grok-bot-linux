@@ -1,8 +1,13 @@
 # How the Linux port works
 
 Grok Bot is an Electron app. Official downloads exist for Windows and
-macOS. A first-party Linux `.deb` existed briefly on Cursor's CDN and was
-withdrawn; staff have said Linux is unsupported.
+macOS, and now Linux as well (`.deb`, `.rpm`, AppImage on x64 and
+arm64). `scripts/install-official.sh` installs those after checking them
+against Cursor's signed apt/dnf metadata (key
+`380F F4BC DC34 A4BD 92A3 5653 42A1 772E 62E4 92D6`, Anysphere Inc) or the
+AppImage SHA-256 from the update service. The rest of this page describes the
+rebuild path, which this repository keeps for pinning, auditing, and offline
+builds.
 
 The same approach that [codex-desktop-linux](https://github.com/ilysenko/codex-desktop-linux)
 originally used for OpenAI's Mac app applies here, with one practical

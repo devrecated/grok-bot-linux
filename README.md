@@ -2,12 +2,39 @@
 
 Unofficial Ubuntu/Linux build of the **Grok Bot** desktop app.
 
-Cursor ships Grok Bot for macOS and Windows only. This repo does the same
+Cursor originally shipped Grok Bot for macOS and Windows only. This repo does the same
 thing the [Codex Mac-to-Linux port](https://github.com/ilysenko/codex-desktop-linux)
 did: take the official Electron app, put it on a Linux Electron runtime,
 and replace the Windows-only native addons.
 
-It is **not** an xAI or Cursor product. Linux is unsupported by them.
+It is **not** an xAI or Cursor product.
+
+## Official Linux builds are now available
+
+Cursor now publishes official Linux builds with every
+stable release: `.deb`, `.rpm` and AppImage, for x64 and arm64
+([download page](https://cursor.com/download/bot),
+[deployment docs](https://cursor.com/docs/grok-bot/deployment)). If you just
+want Grok Bot on Linux, the official build is the simplest choice.
+
+To install it from this checkout, with every download verified against
+Cursor's signed package metadata before anything is installed:
+
+```bash
+make install-official          # .deb on Debian/Ubuntu, .rpm on Fedora/openSUSE, else AppImage
+./scripts/install-official.sh --format appimage
+./scripts/install-official.sh --check
+```
+
+If the rebuilt `grok-bot` package from this repository is installed,
+`make install-official` replaces it with the official package (both are
+called `grok-bot`), keeps your sign-in in `~/.config/Grok Bot`, and removes
+the `grok-bot-update` symlink. `grok-bot-update` also refuses to overwrite an
+official install.
+
+The rebuild below still works and is useful when you want to pin or audit a
+specific version, build offline from an installer you already have, or
+patch the app yourself.
 
 ## What you get
 
